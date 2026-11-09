@@ -11,7 +11,8 @@
       "Bash(npm *)",
       "Bash(cat *)",
       "Bash(grep *)",
-      "Bash(git add *)"
+      "Bash(git add *)",
+      "Bash(git commit *)"
     ]
   },
   "$version": 3

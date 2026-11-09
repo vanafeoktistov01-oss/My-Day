@@ -1,6 +1,6 @@
-#!/bin/bash
+#!/bin/sh
 # Setup Telegram bot: webhook + commands
-# Run inside Railway container
+# Run inside Railway container (Alpine Linux — uses /bin/sh)
 
 BOT_TOKEN="${TELEGRAM_BOT_TOKEN:-your-token}"
 APP_URL="${NEXT_PUBLIC_APP_URL:-https://your-app.vercel.app}"

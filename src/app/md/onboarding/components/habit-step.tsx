@@ -13,10 +13,12 @@ export default function HabitStep({
   initialTitle = "Пить воду",
   onComplete,
   onBack,
+  saving = false,
 }: {
   initialTitle?: string;
   onComplete: () => void;
   onBack?: () => void;
+  saving?: boolean;
 }) {
   const [title, setTitle] = useState(initialTitle);
   const [selectedHabit, setSelectedHabit] = useState<{ icon: string; title: string } | null>(null);
@@ -83,10 +85,10 @@ export default function HabitStep({
         <button
           className="btn-primary"
           onClick={onComplete}
-          disabled={!title.trim()}
+          disabled={!title.trim() || saving}
           style={{ flex: 1 }}
         >
-          🚀 Начать
+          {saving ? "Сохранение..." : "🚀 Начать"}
         </button>
       </div>
 

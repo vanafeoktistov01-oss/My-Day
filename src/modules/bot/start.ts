@@ -1,5 +1,9 @@
 import { Bot } from "grammy";
 import { prisma } from "@/lib/prisma";
+import { getInsights, evaluateCondition } from "@/lib/myday/insights";
+import { calculateStreak, calculateAverage } from "@/lib/myday/streak";
+import { getLocalDateStr } from "@/lib/myday/datetime";
+import type { InsightCondition, StatsResponse } from "@/lib/myday/types";
 
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN || "dev-token");
 
@@ -14,7 +18,6 @@ bot.command("start", async (ctx) => {
 
   const telegramId = String(chatId);
 
-  // Upsert profile
   const profile = await prisma.myDayProfile.upsert({
     where: { telegramId },
     create: { telegramId },
@@ -24,16 +27,11 @@ bot.command("start", async (ctx) => {
   const mdUrl = `${APP_URL}/md?tg_user=${telegramId}&path=${profile.onboardedAt ? "checkin" : "onboarding"}`;
 
   await ctx.reply(
-    `Привет! 👋\n\nЯ помогу вам сформировать привычку отслеживать сон, воду и настроение.\n\nНажмите кнопку ниже, чтобы открыть мини-приложение:`,
+    "Привет! 👋\n\nЯ помогу вам сформировать привычку отслеживать сон, воду и настроение.\n\nНажмите кнопку ниже, чтобы открыть мини-приложение:",
     {
       reply_markup: {
         inline_keyboard: [
-          [
-            {
-              text: "🚀 Открыть приложение",
-              url: mdUrl,
-            },
-          ],
+          [{ text: "🚀 Открыть приложение", url: mdUrl }],
         ],
       },
     }
@@ -69,50 +67,26 @@ bot.command("stats", async (ctx) => {
       return ctx.reply("Профиль не найден. Напишите /start чтобы создать.");
     }
 
-    // Calculate streak
     const completedLogs = profile.dailyLogs.filter((l) => l.status === "COMPLETED");
-    let streak = 0;
-    const now = new Date();
-    let checkDate = new Date(now);
 
-    const todayStr = checkDate.toISOString().split("T")[0];
-    const todayLog = completedLogs.find(
-      (l) => l.localDate.toISOString().split("T")[0] === todayStr
-    );
-    if (!todayLog) {
-      checkDate.setDate(checkDate.getDate() - 1);
+    if (completedLogs.length === 0) {
+      return ctx.reply("Пока нет данных для статистики. Начните отмечать дни!");
     }
 
-    while (true) {
-      const dateStr = checkDate.toISOString().split("T")[0];
-      const hasLog = completedLogs.find(
-        (l) => l.localDate.toISOString().split("T")[0] === dateStr
-      );
-      if (hasLog) {
-        streak++;
-        checkDate.setDate(checkDate.getDate() - 1);
-      } else {
-        break;
-      }
-    }
+    // Use shared streak calculation
+    const streak = calculateStreak(profile.dailyLogs, new Date());
 
-    const avgSleep = completedLogs.length > 0
-      ? (completedLogs.reduce((s, l) => s + (l.sleepHours || 0), 0) / completedLogs.length).toFixed(1)
-      : null;
-    const avgWater = completedLogs.length > 0
-      ? (completedLogs.reduce((s, l) => s + (l.waterCups || 0), 0) / completedLogs.length).toFixed(1)
-      : null;
+    const avgSleep = calculateAverage(profile.dailyLogs, "sleepHours");
+    const avgWater = calculateAverage(profile.dailyLogs, "waterCups", 0);
+    const avgMood = calculateAverage(profile.dailyLogs, "mood");
 
     const moodEmojis = ["", "😢", "😕", "😐", "😊", "🤩"];
-    const avgMood = completedLogs.length > 0
-      ? completedLogs.reduce((s, l) => s + (l.mood || 3), 0) / completedLogs.length
-      : 0;
 
     let text = `📊 Ваша статистика:\n\n`;
     text += `🔥 Серия: ${streak} дн.\n`;
     if (avgSleep) text += `☀️ Сон: ${avgSleep} ч\n`;
     if (avgWater) text += `💧 Вода: ${avgWater} стак.\n`;
-    if (avgMood > 0) text += `😊 Настроение: ${moodEmojis[Math.round(avgMood)]}\n`;
+    if (avgMood) text += `😊 Настроение: ${moodEmojis[Math.round(avgMood)]}\n`;
     text += `\n📝 Всего записей: ${completedLogs.length}`;
 
     const mdUrl = `${APP_URL}/md/stats?tg_user=${telegramId}&path=stats`;
@@ -120,18 +94,13 @@ bot.command("stats", async (ctx) => {
     await ctx.reply(text, {
       reply_markup: {
         inline_keyboard: [
-          [
-            {
-              text: "📊 Открыть статистику",
-              url: mdUrl,
-            },
-          ],
+          [{ text: "📊 Открыть статистику", url: mdUrl }],
         ],
       },
     });
   } catch (err) {
     console.error("Stats command error:", err);
-    await ctx.reply("Пока нет данных для статистики. Начните отмечать дни!");
+    await ctx.reply("Не удалось загрузить статистику. Попробуйте позже.");
   }
 });
 
@@ -170,24 +139,22 @@ bot.command("insights", async (ctx) => {
       return ctx.reply("💡 Нужно минимум 3 записи для инсайтов. Продолжайте отмечать дни!");
     }
 
-    const insights: string[] = [];
+    // Parse conditions and use shared helper
+    const typedRules = profile.insightRules.map((rule) => ({
+      id: rule.id,
+      message: rule.message,
+      condition: rule.condition as InsightCondition | null,
+    }));
 
-    for (const rule of profile.insightRules) {
-      const condition = rule.condition as { type: string } | null;
-      if (!condition) continue;
+    const matched = getInsights(typedRules, profile.dailyLogs);
 
-      if (await matchesCondition(condition, completedLogs)) {
-        insights.push(rule.message);
-      }
-    }
-
-    if (insights.length === 0) {
+    if (matched.length === 0) {
       return ctx.reply("🔍 Пока не нашли интересных закономерностей. Продолжайте вести дневник!");
     }
 
     let text = "💡 Ваши инсайты за последние 30 дней:\n\n";
-    insights.slice(0, 3).forEach((insight, i) => {
-      text += `${i + 1}. ${insight}\n`;
+    matched.slice(0, 3).forEach((insight, i) => {
+      text += `${i + 1}. ${insight.message}\n`;
     });
 
     await ctx.reply(text);
@@ -211,7 +178,6 @@ bot.on("callback_query:data", async (ctx) => {
 
   switch (action) {
     case "checkin": {
-      // Сохраняем COMPLETED чек-ин
       try {
         const profile = await prisma.myDayProfile.findUnique({
           where: { telegramId: telegramIdStr },
@@ -221,31 +187,26 @@ bot.on("callback_query:data", async (ctx) => {
           return ctx.answerCallbackQuery({ text: "Профиль не найден" });
         }
 
-        const now = new Date();
-        const todayStr = now.toISOString().split("T")[0];
+        // Use user's local date
+        const localDateStr = getLocalDateStr(new Date(), profile.timezone);
 
         await prisma.myDayDailyLog.upsert({
           where: {
             profileId_localDate: {
               profileId: profile.id,
-              localDate: new Date(todayStr),
+              localDate: new Date(localDateStr + "T00:00:00.000Z"),
             },
           },
           create: {
             profileId: profile.id,
-            localDate: new Date(todayStr),
+            localDate: new Date(localDateStr + "T00:00:00.000Z"),
             status: "COMPLETED",
           },
           update: { status: "COMPLETED" },
         });
 
         await ctx.answerCallbackQuery({ text: "✅ Отмечено!" });
-        await ctx.reply("✅ Отлично! День отмечен! 🎉", {
-          reply_markup: {
-            force_reply: true,
-            selective: true,
-          },
-        });
+        await ctx.reply("✅ Отлично! День отмечен! 🎉");
       } catch (err) {
         console.error("Checkin callback error:", err);
         await ctx.answerCallbackQuery({ text: "Ошибка" });
@@ -283,9 +244,7 @@ bot.on("callback_query:data", async (ctx) => {
     }
 
     case "open_app": {
-      const mdUrl = `${APP_URL}/md?tg_user=${telegramIdStr}&path=checkin`;
       await ctx.answerCallbackQuery({ text: "Открываю..." });
-      // Telegram doesn't support opening URL from callback, so just acknowledge
       break;
     }
 
@@ -293,92 +252,5 @@ bot.on("callback_query:data", async (ctx) => {
       await ctx.answerCallbackQuery();
   }
 });
-
-// ==========================================
-// Helper: evaluate condition
-// ==========================================
-async function matchesCondition(
-  condition: { type: string; [key: string]: any },
-  logs: any[]
-): Promise<boolean> {
-  const completedLogs = logs.filter((l) => l.status === "COMPLETED");
-
-  switch (condition.type) {
-    case "less_than": {
-      const field = condition.field;
-      const threshold = condition.threshold;
-      const days = condition.days || 7;
-
-      if (!field || threshold === undefined) return false;
-
-      const now = new Date();
-      const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-      const recentLogs = completedLogs.filter((l) => l.localDate >= since);
-
-      if (recentLogs.length === 0) return false;
-
-      const belowCount = recentLogs.filter(
-        (l) => l[field] !== null && l[field] < threshold
-      ).length;
-
-      return belowCount >= (condition.minDays || 3);
-    }
-
-    case "greater_than": {
-      const field = condition.field;
-      const threshold = condition.threshold;
-      const days = condition.days || 7;
-
-      if (!field || threshold === undefined) return false;
-
-      const now = new Date();
-      const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-      const recentLogs = completedLogs.filter((l) => l.localDate >= since);
-
-      if (recentLogs.length === 0) return false;
-
-      const aboveCount = recentLogs.filter(
-        (l) => l[field] !== null && l[field] >= threshold
-      ).length;
-
-      return aboveCount >= (condition.minDays || 3);
-    }
-
-    case "streak": {
-      const minDays = condition.minDays;
-      if (!minDays) return false;
-
-      let streak = 0;
-      const now = new Date();
-      let checkDate = new Date(now);
-
-      const todayStr = checkDate.toISOString().split("T")[0];
-      const todayLog = completedLogs.find(
-        (l) => l.localDate.toISOString().split("T")[0] === todayStr
-      );
-      if (!todayLog) {
-        checkDate.setDate(checkDate.getDate() - 1);
-      }
-
-      while (true) {
-        const dateStr = checkDate.toISOString().split("T")[0];
-        const hasLog = completedLogs.find(
-          (l) => l.localDate.toISOString().split("T")[0] === dateStr
-        );
-        if (hasLog) {
-          streak++;
-          checkDate.setDate(checkDate.getDate() - 1);
-        } else {
-          break;
-        }
-      }
-
-      return streak >= minDays;
-    }
-
-    default:
-      return false;
-  }
-}
 
 export { bot };

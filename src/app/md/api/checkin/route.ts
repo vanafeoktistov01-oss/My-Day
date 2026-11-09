@@ -1,17 +1,19 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { sanitizeTelegramId } from "@/lib/myday/validation";
+import { validateCheckin } from "@/lib/myday/validation";
+import { getLocalDateStr } from "@/lib/myday/datetime";
 
 // GET /md/api/checkin?telegramId=xxx
 export async function GET(req: NextRequest) {
   const url = new URL(req.url);
-  const telegramId = url.searchParams.get("telegramId");
+  const telegramId = sanitizeTelegramId(url.searchParams.get("telegramId"));
 
   if (!telegramId) {
-    return NextResponse.json({ error: "telegramId required" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid telegramId" }, { status: 400 });
   }
 
   try {
-    // Находим профиль
     const profile = await prisma.myDayProfile.findUnique({
       where: { telegramId },
       include: { habits: true },
@@ -21,16 +23,14 @@ export async function GET(req: NextRequest) {
       return NextResponse.json({ today: null, profile: null });
     }
 
-    // Текущая дата в часовом поясе пользователя
-    const now = new Date();
-    const todayStr = now.toISOString().split("T")[0]; // UTC — упрощение
+    // Convert UTC now to user's local date
+    const localDateStr = getLocalDateStr(new Date(), profile.timezone);
 
-    // Ищем чек-ин за сегодня
     const todayLog = await prisma.myDayDailyLog.findUnique({
       where: {
         profileId_localDate: {
           profileId: profile.id,
-          localDate: new Date(todayStr),
+          localDate: new Date(localDateStr + "T00:00:00.000Z"),
         },
       },
     });
@@ -45,32 +45,32 @@ export async function GET(req: NextRequest) {
     });
   } catch (err) {
     console.error("Checkin GET error:", err);
-    return NextResponse.json({ today: null, profile: null });
+    return NextResponse.json({ error: "Database error" }, { status: 500 });
   }
 }
 
 // POST /md/api/checkin
 export async function POST(req: NextRequest) {
   const url = new URL(req.url);
-  const telegramId = url.searchParams.get("telegramId");
+  const telegramId = sanitizeTelegramId(url.searchParams.get("telegramId"));
 
   if (!telegramId) {
-    return NextResponse.json({ error: "telegramId required" }, { status: 400 });
+    return NextResponse.json({ error: "Invalid telegramId" }, { status: 400 });
   }
-
-  let sleepHours: number | null = null;
-  let waterCups: number | null = null;
-  let mood: number | null = null;
-  let habitDone: boolean | null = null;
 
   try {
     const body = await req.json();
-    sleepHours = body.sleepHours ?? null;
-    waterCups = body.waterCups ?? null;
-    mood = body.mood ?? null;
-    habitDone = body.habitDone ?? null;
+    const validated = validateCheckin(body);
 
-    // Находим профиль
+    if (!validated) {
+      return NextResponse.json(
+        { error: "Invalid checkin data", details: "Check sleepHours, waterCups, mood, habitDone ranges" },
+        { status: 400 }
+      );
+    }
+
+    const { sleepHours, waterCups, mood, habitDone } = validated;
+
     const profile = await prisma.myDayProfile.findUnique({
       where: { telegramId },
     });
@@ -79,20 +79,19 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: "Profile not found" }, { status: 404 });
     }
 
-    const now = new Date();
-    const todayStr = now.toISOString().split("T")[0];
+    // Convert UTC now to user's local date
+    const localDateStr = getLocalDateStr(new Date(), profile.timezone);
 
-    // Upsert daily log
     const log = await prisma.myDayDailyLog.upsert({
       where: {
         profileId_localDate: {
           profileId: profile.id,
-          localDate: new Date(todayStr),
+          localDate: new Date(localDateStr + "T00:00:00.000Z"),
         },
       },
       create: {
         profileId: profile.id,
-        localDate: new Date(todayStr),
+        localDate: new Date(localDateStr + "T00:00:00.000Z"),
         sleepHours,
         waterCups,
         mood,
@@ -111,14 +110,6 @@ export async function POST(req: NextRequest) {
     return NextResponse.json(log);
   } catch (err) {
     console.error("Checkin POST error:", err);
-    // Демо-режим
-    return NextResponse.json({
-      id: "demo",
-      sleepHours,
-      waterCups,
-      mood,
-      habitDone,
-      status: "COMPLETED",
-    });
+    return NextResponse.json({ error: "Database error" }, { status: 500 });
   }
 }

@@ -2,10 +2,10 @@
 
 import { useState, useEffect, Suspense } from "react";
 import Link from "next/link";
+import { useSearchParams, useRouter } from "next/navigation";
 
 const moodEmojis = ["😢", "😕", "😐", "😊", "🤩"];
 
-// Loading fallback
 function Loading() {
   return (
     <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "50vh" }}>
@@ -14,13 +14,11 @@ function Loading() {
   );
 }
 
-// Stats content that uses useRouter/useSearchParams
-function StatsContent() {
-  const { useRouter, useSearchParams } = require("next/navigation");
-  const router = useRouter();
+// Stats content — wrapped in a separate component for Suspense
+function StatsInner() {
   const searchParams = useSearchParams();
   const telegramId = searchParams.get("tg_user") || "demo";
-  const [stats, setStats] = useState<any>(null);
+  const [stats, setStats] = useState<Record<string, any> | null>(null);
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"stats" | "insights">("stats");
 
@@ -28,7 +26,7 @@ function StatsContent() {
     fetch(`/md/api/stats?telegramId=${telegramId}`)
       .then((r) => r.json())
       .then((data) => {
-        setStats(data);
+        if (!data.error) setStats(data);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -38,7 +36,6 @@ function StatsContent() {
 
   return (
     <div style={{ paddingBottom: "40px" }}>
-      {/* Header */}
       <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "20px" }}>
         <h1 style={{ fontSize: "24px", fontWeight: 700, margin: 0 }}>Статистика</h1>
         <Link
@@ -49,7 +46,6 @@ function StatsContent() {
         </Link>
       </div>
 
-      {/* Tabs */}
       <div style={{ display: "flex", gap: "4px", marginBottom: "20px", background: "var(--muted)", borderRadius: "10px", padding: "3px" }}>
         {(["stats", "insights"] as const).map((tab) => (
           <button
@@ -75,7 +71,6 @@ function StatsContent() {
 
       {activeTab === "stats" && (
         <>
-          {/* Streak Card */}
           <div
             className="card"
             style={{
@@ -91,12 +86,11 @@ function StatsContent() {
             <div style={{ fontSize: "14px", opacity: 0.85 }}>дней подряд</div>
             {stats?.maxStreak > stats?.streak && (
               <div style={{ fontSize: "12px", opacity: 0.7, marginTop: "8px" }}>
-                Рекорд: {stats.maxStreak}
+                Рекорд: {stats!.maxStreak}
               </div>
             )}
           </div>
 
-          {/* Averages */}
           {(stats?.avgSleep || stats?.avgWater || stats?.avgMood) && (
             <div className="card">
               <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--muted-foreground)", marginBottom: "12px" }}>
@@ -125,7 +119,6 @@ function StatsContent() {
             </div>
           )}
 
-          {/* Heatmap */}
           <div className="card">
             <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--muted-foreground)", marginBottom: "12px" }}>
               Последние 30 дней
@@ -151,7 +144,6 @@ function StatsContent() {
             </div>
           </div>
 
-          {/* Habits */}
           {stats?.habits?.length > 0 && (
             <div className="card">
               <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--muted-foreground)", marginBottom: "12px" }}>
@@ -169,7 +161,6 @@ function StatsContent() {
             </div>
           )}
 
-          {/* Total logs */}
           {stats?.totalLogs && (
             <div style={{ textAlign: "center", color: "var(--muted-foreground)", fontSize: "13px" }}>
               Всего записей: {stats.totalLogs}
@@ -183,10 +174,6 @@ function StatsContent() {
   );
 }
 
-// ==========================================
-// Insights Tab
-// ==========================================
-
 function InsightsTab({ telegramId }: { telegramId: string }) {
   const [insights, setInsights] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
@@ -195,7 +182,7 @@ function InsightsTab({ telegramId }: { telegramId: string }) {
     fetch(`/md/api/insights?telegramId=${telegramId}`)
       .then((r) => r.json())
       .then((data) => {
-        setInsights(data.insights || []);
+        if (!data.error) setInsights(data.insights || []);
         setLoading(false);
       })
       .catch(() => setLoading(false));
@@ -225,15 +212,11 @@ function InsightsTab({ telegramId }: { telegramId: string }) {
   );
 }
 
-// ==========================================
-// Main export with Suspense
-// ==========================================
-
 export default function Page() {
   return (
     <div className="md-container">
       <Suspense fallback={<Loading />}>
-        <StatsContent />
+        <StatsInner />
       </Suspense>
     </div>
   );

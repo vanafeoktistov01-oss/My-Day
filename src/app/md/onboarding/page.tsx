@@ -14,10 +14,11 @@ function OnboardingContent() {
   const [timezone, setTimezone] = useState("Europe/Moscow");
   const [reminderTime, setReminderTime] = useState("09:00");
   const [habitTitle, setHabitTitle] = useState("Пить воду");
+  const [saving, setSaving] = useState(false);
 
   const handleComplete = async () => {
+    setSaving(true);
     try {
-      // 1. Создаём/обновляем профиль
       await fetch("/md/api/profile", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -28,7 +29,6 @@ function OnboardingContent() {
         }),
       });
 
-      // 2. Создаём привычку
       await fetch("/md/api/habit", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -39,76 +39,38 @@ function OnboardingContent() {
         }),
       });
 
-      // 3. Редирект на чек-ин
       router.push(`/md?tg_user=${telegramId}&path=checkin`);
     } catch (err) {
       console.error("Onboarding failed:", err);
-      // Fallback — редирект на чек-ин
       router.push(`/md?tg_user=${telegramId}&path=checkin`);
+    } finally {
+      setSaving(false);
     }
-  };
-
-  const handleTimezoneSelect = (tz: string) => {
-    setTimezone(tz);
-    setStep(2);
-  };
-
-  const handleReminderSelect = (time: string) => {
-    setReminderTime(time);
-    setStep(3);
   };
 
   return (
     <div style={{ paddingBottom: "40px" }}>
-      {/* Step indicator */}
       <div className="step-dots">
         {[1, 2, 3].map((s) => (
-          <div
-            key={s}
-            className={`step-dot ${step >= s ? "active" : ""}`}
-          />
+          <div key={s} className={`step-dot ${step >= s ? "active" : ""}`} />
         ))}
       </div>
 
-      <h1
-        style={{
-          fontSize: "22px",
-          fontWeight: 700,
-          marginBottom: "4px",
-          textAlign: "center",
-        }}
-      >
-        {step === 1
-          ? "Куда вы живёте? 🌍"
-          : step === 2
-            ? "Когда напомнить? ⏰"
-            : "Что отслеживать? 🎯"}
+      <h1 style={{ fontSize: "22px", fontWeight: 700, marginBottom: "4px", textAlign: "center" }}>
+        {step === 1 ? "Куда вы живёте? 🌍" : step === 2 ? "Когда напомнить? ⏰" : "Что отслеживать? 🎯"}
       </h1>
-      <p
-        style={{
-          color: "var(--muted-foreground)",
-          textAlign: "center",
-          marginBottom: "24px",
-          fontSize: "14px",
-        }}
-      >
-        {step === 1
-          ? "Чтобы напоминания приходили в нужное время"
-          : step === 2
-            ? "Мы напомним отметить день"
-            : "Начните с одной привычки — добавите позже"}
+      <p style={{ color: "var(--muted-foreground)", textAlign: "center", marginBottom: "24px", fontSize: "14px" }}>
+        {step === 1 ? "Чтобы напоминания приходили в нужное время"
+          : step === 2 ? "Мы напомним отметить день"
+          : "Начните с одной привычки — добавите позже"}
       </p>
 
-      {step === 1 && (
-        <TimezoneStep
-          onSelect={handleTimezoneSelect}
-        />
-      )}
+      {step === 1 && <TimezoneStep onSelect={(tz) => { setTimezone(tz); setStep(2); }} />}
 
       {step === 2 && (
         <ReminderStep
           initialTime={reminderTime}
-          onSelect={handleReminderSelect}
+          onSelect={(time) => { setReminderTime(time); setStep(3); }}
           onBack={() => setStep(1)}
         />
       )}
@@ -118,6 +80,7 @@ function OnboardingContent() {
           initialTitle={habitTitle}
           onComplete={handleComplete}
           onBack={() => setStep(2)}
+          saving={saving}
         />
       )}
     </div>

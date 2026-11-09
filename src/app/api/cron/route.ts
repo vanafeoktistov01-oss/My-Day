@@ -1,16 +1,15 @@
 import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
+import { isReminderTime, getLocalDateStr } from "@/lib/myday/datetime";
+import { evaluateCondition, getInsights } from "@/lib/myday/insights";
+import type { InsightCondition, StatsResponse } from "@/lib/myday/types";
 
 const APP_URL = process.env.NEXT_PUBLIC_APP_URL || "https://your-app.vercel.app";
 const BOT_TOKEN = process.env.TELEGRAM_BOT_TOKEN;
 const CRON_SECRET = process.env.CRON_SECRET;
 
 // GET/POST /api/cron
-// Triggered by Vercel Cron:
-//   - Every hour → reminders
-//   - Sunday 18:00 → weekly insights
 export async function POST(req: NextRequest) {
-  // Validate secret
   const url = new URL(req.url);
   const token = url.searchParams.get("token");
 
@@ -19,7 +18,7 @@ export async function POST(req: NextRequest) {
   }
 
   const now = new Date();
-  const dayOfWeek = now.getUTCDay(); // 0 = Sunday
+  const dayOfWeek = now.getUTCDay();
   const hour = now.getUTCHours();
 
   let results = {
@@ -29,7 +28,6 @@ export async function POST(req: NextRequest) {
   };
 
   try {
-    // 1. Hourly: Send reminders
     results.remindersSent = await sendReminders(now);
   } catch (err) {
     console.error("Cron reminders error:", err);
@@ -37,7 +35,6 @@ export async function POST(req: NextRequest) {
   }
 
   try {
-    // 2. Sunday 18:00: Send weekly insights
     if (dayOfWeek === 0 && hour === 18) {
       results.insightsSent = await sendWeeklyInsights();
     }
@@ -53,39 +50,51 @@ export async function POST(req: NextRequest) {
 // Hourly reminders
 // ==========================================
 async function sendReminders(now: Date): Promise<number> {
-  let sent = 0;
-
   try {
-    // Get all profiles with reminder time set
+    // Batch: fetch all profiles and today's logs in one query
     const profiles = await prisma.myDayProfile.findMany({
       where: {
         reminderTime: { not: null },
       },
     });
 
+    if (profiles.length === 0) return 0;
+
+    // Batch fetch all today's logs at once
+    const todayStr = now.toISOString().split("T")[0];
+    const todayLogs = await prisma.myDayDailyLog.findMany({
+      where: {
+        localDate: {
+          gte: new Date(todayStr + "T00:00:00.000Z"),
+          lt: new Date(todayStr + "T23:59:59.999Z"),
+        },
+        profileId: {
+          in: profiles.map((p) => p.id),
+        },
+      },
+    });
+
+    // Build lookup: profileId -> today's log
+    const todayLogMap = new Map(
+      todayLogs.map((log) => [log.profileId, log])
+    );
+
+    let sent = 0;
+
     for (const profile of profiles) {
       try {
-        // Check if reminder time is now (in user's timezone)
         const reminderTime = profile.reminderTime;
         if (!reminderTime) continue;
 
-        // Get user's current hour (approximate using offset from UTC)
-        const userTime = convertToUserTime(reminderTime, profile.timezone, now);
-        if (!userTime.isTime) continue;
+        // Use proper timezone-aware check
+        if (!isReminderTime(now, reminderTime.toTimeString().slice(0, 5), profile.timezone)) {
+          continue;
+        }
 
         // Check if user already completed today's check-in
-        const todayStr = now.toISOString().split("T")[0];
-        const todayLog = await prisma.myDayDailyLog.findUnique({
-          where: {
-            profileId_localDate: {
-              profileId: profile.id,
-              localDate: new Date(todayStr),
-            },
-          },
-        });
-
+        const todayLog = todayLogMap.get(profile.id);
         if (todayLog && todayLog.status === "COMPLETED") {
-          continue; // Already checked in
+          continue;
         }
 
         // Check max retries
@@ -99,10 +108,9 @@ async function sendReminders(now: Date): Promise<number> {
 
         const lastTask = pendingTasks[0];
         if (lastTask && lastTask.retryCount >= lastTask.maxRetries) {
-          continue; // Max retries exceeded
+          continue;
         }
 
-        // Create reminder task
         await prisma.myDayReminderTask.create({
           data: {
             profileId: profile.id,
@@ -111,51 +119,24 @@ async function sendReminders(now: Date): Promise<number> {
           },
         });
 
-        // Send reminder via Telegram Bot API
         await sendReminderToUser(String(profile.telegramId));
         sent++;
       } catch (err) {
         console.error(`Reminder error for ${profile.telegramId}:`, err);
       }
     }
+
+    return sent;
   } catch (err) {
     console.error("sendReminders error:", err);
-  }
-
-  return sent;
-}
-
-function convertToUserTime(
-  reminderTime: Date,
-  timezone: string,
-  now: Date
-): { isTime: boolean } {
-  try {
-    // Get the hour from the reminderTime (stored as DateTime, use the time portion)
-    const reminderHour = reminderTime.getUTCHours();
-    const reminderMinute = reminderTime.getUTCMinutes();
-
-    // Simple check: if current UTC hour matches reminder hour (approximate)
-    // In production, use a timezone library like `temporal` or `date-fns-tz`
-    // For now, check if we're in the same hour window
-    const nowHour = now.getUTCHours();
-
-    // This is a rough check — in production, properly convert UTC to timezone
-    // using IANA timezone database
-    return { isTime: nowHour === reminderHour };
-  } catch {
-    return { isTime: false };
+    return 0;
   }
 }
 
 async function sendReminderToUser(telegramId: string) {
-  if (!BOT_TOKEN) {
-    console.warn("TELEGRAM_BOT_TOKEN not set, skipping reminder");
-    return;
-  }
+  if (!BOT_TOKEN) return;
 
   const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
-
   const mdUrl = `${APP_URL}/md?tg_user=${telegramId}&path=checkin`;
 
   try {
@@ -170,21 +151,10 @@ async function sendReminderToUser(telegramId: string) {
           "Нажмите кнопку, чтобы открыть приложение:",
         reply_markup: {
           inline_keyboard: [
+            [{ text: "☀️ Отметить день", url: mdUrl }],
             [
-              {
-                text: "☀️ Отметить день",
-                url: mdUrl,
-              },
-            ],
-            [
-              {
-                text: "✅ Да, сегодня!",
-                callback_data: `checkin ${telegramId}`,
-              },
-              {
-                text: "⏰ Позже (через 10 мин)",
-                callback_data: `snooze ${telegramId} 10`,
-              },
+              { text: "✅ Да, сегодня!", callback_data: `checkin ${telegramId}` },
+              { text: "⏰ Позже (через 10 мин)", callback_data: `snooze ${telegramId} 10` },
             ],
           ],
         },
@@ -199,8 +169,6 @@ async function sendReminderToUser(telegramId: string) {
 // Weekly insights (Sunday 18:00 UTC)
 // ==========================================
 async function sendWeeklyInsights(): Promise<number> {
-  let sent = 0;
-
   try {
     const profiles = await prisma.myDayProfile.findMany({
       include: {
@@ -216,6 +184,8 @@ async function sendWeeklyInsights(): Promise<number> {
       },
     });
 
+    let sent = 0;
+
     for (const profile of profiles) {
       try {
         const completedLogs = profile.dailyLogs.filter(
@@ -224,40 +194,41 @@ async function sendWeeklyInsights(): Promise<number> {
 
         if (completedLogs.length < 3) continue;
 
-        const insights: string[] = [];
+        // Use shared typed rules and evaluator
+        const typedRules = profile.insightRules.map((rule) => ({
+          id: rule.id,
+          message: rule.message,
+          condition: rule.condition as InsightCondition | null,
+        }));
 
-        for (const rule of profile.insightRules) {
-          const condition = rule.condition as { type: string } | null;
-          if (!condition) continue;
+        const matched = getInsights(typedRules, profile.dailyLogs);
+        if (matched.length === 0) continue;
 
-          if (await matchesCondition(condition, completedLogs)) {
-            insights.push(rule.message);
-          }
-        }
-
-        if (insights.length === 0) continue;
-
-        await sendInsightsToUser(String(profile.telegramId), insights);
+        await sendInsightsToUser(String(profile.telegramId), matched);
         sent++;
       } catch (err) {
         console.error(`Insights error for ${profile.telegramId}:`, err);
       }
     }
+
+    return sent;
   } catch (err) {
     console.error("sendWeeklyInsights error:", err);
+    return 0;
   }
-
-  return sent;
 }
 
-async function sendInsightsToUser(telegramId: string, insights: string[]) {
+async function sendInsightsToUser(
+  telegramId: string,
+  insights: Array<{ ruleId: string; message: string }>
+) {
   if (!BOT_TOKEN) return;
 
   const url = `https://api.telegram.org/bot${BOT_TOKEN}/sendMessage`;
 
   let text = "📊 Ваш еженедельный отчёт:\n\n";
   insights.slice(0, 3).forEach((insight, i) => {
-    text += `${i + 1}. ${insight}\n`;
+    text += `${i + 1}. ${insight.message}\n`;
   });
 
   if (insights.length === 1) {
@@ -275,61 +246,5 @@ async function sendInsightsToUser(telegramId: string, insights: string[]) {
     });
   } catch (err) {
     console.error("Failed to send insights:", err);
-  }
-}
-
-async function matchesCondition(
-  condition: { type: string; [key: string]: any },
-  logs: any[]
-): Promise<boolean> {
-  switch (condition.type) {
-    case "less_than": {
-      const field = condition.field;
-      const threshold = condition.threshold;
-      const days = condition.days || 7;
-
-      if (!field || threshold === undefined) return false;
-
-      const now = new Date();
-      const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-      const recentLogs = logs.filter((l) => l.localDate >= since);
-
-      if (recentLogs.length === 0) return false;
-
-      const belowCount = recentLogs.filter(
-        (l) => l[field] !== null && l[field] < threshold
-      ).length;
-
-      return belowCount >= (condition.minDays || 3);
-    }
-
-    case "greater_than": {
-      const field = condition.field;
-      const threshold = condition.threshold;
-      const days = condition.days || 7;
-
-      if (!field || threshold === undefined) return false;
-
-      const now = new Date();
-      const since = new Date(now.getTime() - days * 24 * 60 * 60 * 1000);
-      const recentLogs = logs.filter((l) => l.localDate >= since);
-
-      if (recentLogs.length === 0) return false;
-
-      const aboveCount = recentLogs.filter(
-        (l) => l[field] !== null && l[field] >= threshold
-      ).length;
-
-      return aboveCount >= (condition.minDays || 3);
-    }
-
-    case "streak": {
-      const minDays = condition.minDays;
-      if (!minDays) return false;
-      return logs.length >= minDays;
-    }
-
-    default:
-      return false;
   }
 }

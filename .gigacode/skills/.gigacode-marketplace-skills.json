@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "skills": {
+    "bundled:jobs-to-be-done": {
+      "dirName": "jobs-to-be-done",
+      "marketplaceVersion": "0.1.0"
+    },
+    "bundled:frontend-design": {
+      "dirName": "frontend-design",
+      "marketplaceVersion": "0.1.0"
+    },
+    "bundled:code-reviewer": {
+      "dirName": "code-reviewer",
+      "marketplaceVersion": "0.1.0"
+    }
+  }
+}

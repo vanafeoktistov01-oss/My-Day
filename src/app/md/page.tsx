@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useState, Suspense } from "react";
+import { useState, useEffect, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
+import Link from "next/link";
 
 function PageContent() {
   const router = useRouter();
@@ -20,14 +21,13 @@ function PageContent() {
   const [todayLog, setTodayLog] = useState<any>(null);
   const [stats, setStats] = useState<any>(null);
 
-  // Загружаем статус онбординга
+  // Check onboarding status
   useEffect(() => {
     if (!path) {
       router.push("/md/onboarding");
       return;
     }
 
-    // Проверяем что пользователь онбординг прошёл
     fetch(`/md/api/profile?telegramId=${telegramId}`)
       .then((r) => r.json())
       .then((data) => {
@@ -37,13 +37,11 @@ function PageContent() {
           setOnboarded(true);
         }
       })
-      .catch(() => {
-        setOnboarded(true);
-      })
+      .catch(() => setOnboarded(true))
       .finally(() => setLoading(false));
   }, [telegramId, path, router]);
 
-  // Загружаем今天的 чек-ин
+  // Load today's check-in
   useEffect(() => {
     if (!onboarded) return;
 
@@ -66,7 +64,7 @@ function PageContent() {
     setSaving(true);
 
     try {
-      await fetch("/md/api/checkin", {
+      const res = await fetch("/md/api/checkin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
@@ -78,7 +76,14 @@ function PageContent() {
         }),
       });
 
-      // Загружаем статистику
+      const result = await res.json();
+      if (result.error) {
+        alert("Ошибка: " + result.error);
+        setSaving(false);
+        return;
+      }
+
+      // Load stats
       const statsRes = await fetch(`/md/api/stats?telegramId=${telegramId}`);
       const statsData = await statsRes.json();
       setStats(statsData);
@@ -100,7 +105,6 @@ function PageContent() {
 
   if (!onboarded) return null;
 
-  // Success state
   if (saved) {
     return (
       <SuccessView stats={stats} sleep={sleep} water={water} mood={mood} habitDone={habitDone} onClose={() => setSaved(false)} />
@@ -109,31 +113,22 @@ function PageContent() {
 
   return (
     <CheckInView
-      todayLog={todayLog}
       sleep={sleep} setSleep={setSleep}
       water={water} setWater={setWater}
       mood={mood} setMood={setMood}
       habitDone={habitDone} setHabitDone={setHabitDone}
-      saving={saving} saved={saved}
+      saving={saving}
       onSubmit={handleSubmit}
     />
   );
 }
 
-// ==========================================
-// Success view
-// ==========================================
-
 function SuccessView({ stats, sleep, water, mood, habitDone, onClose }: any) {
   return (
     <div style={{ padding: "40px 0", textAlign: "center" }}>
       <div style={{ fontSize: "48px", marginBottom: "16px" }}>✅</div>
-      <h1 style={{ fontSize: "22px", fontWeight: 700, marginBottom: "8px" }}>
-        Отмечено!
-      </h1>
-      <p style={{ color: "var(--muted-foreground)", marginBottom: "24px" }}>
-        Вы отметили сегодня:
-      </p>
+      <h1 style={{ fontSize: "22px", fontWeight: 700, marginBottom: "8px" }}>Отмечено!</h1>
+      <p style={{ color: "var(--muted-foreground)", marginBottom: "24px" }}>Вы отметили сегодня:</p>
       <div className="card" style={{ textAlign: "left", marginBottom: "24px" }}>
         {sleep && <p style={{ margin: "8px 0" }}>☀️ Сон: {sleep} ч</p>}
         {water && <p style={{ margin: "8px 0" }}>💧 Вода: {water} стак.</p>}
@@ -146,36 +141,23 @@ function SuccessView({ stats, sleep, water, mood, habitDone, onClose }: any) {
       </div>
       {stats && stats.streak > 0 && (
         <div className="card" style={{ background: "var(--secondary)", textAlign: "center" }}>
-          <p style={{ fontSize: "24px", fontWeight: 700, color: "var(--primary)", margin: 0 }}>
-            🔥 {stats.streak}
-          </p>
+          <p style={{ fontSize: "24px", fontWeight: 700, color: "var(--primary)", margin: 0 }}>🔥 {stats.streak}</p>
           <p style={{ color: "var(--muted-foreground)", margin: "4px 0 0" }}>дней подряд</p>
         </div>
       )}
-      <button className="btn-primary" style={{ marginTop: "16px" }} onClick={onClose}>
-        Закрыть
-      </button>
+      <button className="btn-primary" style={{ marginTop: "16px" }} onClick={onClose}>Закрыть</button>
     </div>
   );
 }
 
-// ==========================================
-// Check-in view
-// ==========================================
-
-function CheckInView({ todayLog, sleep, setSleep, water, setWater, mood, setMood, habitDone, setHabitDone, saving, onSubmit }: any) {
+function CheckInView({ sleep, setSleep, water, setWater, mood, setMood, habitDone, setHabitDone, saving, onSubmit }: any) {
   return (
     <div style={{ paddingBottom: "40px" }}>
-      <h1 style={{ fontSize: "24px", fontWeight: 700, marginBottom: "4px" }}>
-        Доброе утро! ☀️
-      </h1>
-      <p style={{ color: "var(--muted-foreground)", marginBottom: "24px" }}>
-        Отметьте свои показатели за сегодня
-      </p>
+      <h1 style={{ fontSize: "24px", fontWeight: 700, marginBottom: "4px" }}>Доброе утро! ☀️</h1>
+      <p style={{ color: "var(--muted-foreground)", marginBottom: "24px" }}>Отметьте свои показатели за сегодня</p>
 
       <form onSubmit={onSubmit}>
         <div className="card">
-          {/* Sleep */}
           <label style={{ display: "block", fontSize: "14px", fontWeight: 600, marginBottom: "8px", color: "var(--muted-foreground)" }}>
             ☀️ Сон (часов)
           </label>
@@ -190,7 +172,6 @@ function CheckInView({ todayLog, sleep, setSleep, water, setWater, mood, setMood
             placeholder="Например: 7.5"
           />
 
-          {/* Water */}
           <label style={{ display: "block", fontSize: "14px", fontWeight: 600, marginBottom: "8px", marginTop: "16px", color: "var(--muted-foreground)" }}>
             💧 Вода (стаканы)
           </label>
@@ -204,7 +185,6 @@ function CheckInView({ todayLog, sleep, setSleep, water, setWater, mood, setMood
             placeholder="Например: 8"
           />
 
-          {/* Mood */}
           <label style={{ display: "block", fontSize: "14px", fontWeight: 600, marginBottom: "8px", marginTop: "16px", color: "var(--muted-foreground)" }}>
             😊 Настроение
           </label>
@@ -237,7 +217,6 @@ function CheckInView({ todayLog, sleep, setSleep, water, setWater, mood, setMood
             ))}
           </div>
 
-          {/* Habit checkbox */}
           <label style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "16px", cursor: "pointer" }}>
             <div
               onClick={() => setHabitDone(!habitDone)}
@@ -255,9 +234,7 @@ function CheckInView({ todayLog, sleep, setSleep, water, setWater, mood, setMood
                 flexShrink: 0,
               }}
             >
-              {habitDone && (
-                <span style={{ color: "white", fontSize: "14px", lineHeight: 1 }}>✓</span>
-              )}
+              {habitDone && <span style={{ color: "white", fontSize: "14px", lineHeight: 1 }}>✓</span>}
             </div>
             <span style={{ fontSize: "16px", fontWeight: 500 }}>🏃 Выполнить привычку сегодня</span>
           </label>
@@ -270,10 +247,6 @@ function CheckInView({ todayLog, sleep, setSleep, water, setWater, mood, setMood
     </div>
   );
 }
-
-// ==========================================
-// Main export
-// ==========================================
 
 export default function Page() {
   return (

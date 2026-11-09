@@ -12,7 +12,14 @@
       "Bash(cat *)",
       "Bash(grep *)",
       "Bash(git add *)",
-      "Bash(git commit *)"
+      "Bash(git commit *)",
+      "Bash(brew *)",
+      "Bash(cloudflared *)",
+      "Bash(sleep *)",
+      "Bash(curl *)",
+      "Bash(lsof *)",
+      "Bash(kill *)",
+      "Bash(tee *)"
     ]
   },
   "$version": 3

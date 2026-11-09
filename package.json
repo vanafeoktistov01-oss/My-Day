@@ -9,18 +9,36 @@
     "lint": "eslint"
   },
   "dependencies": {
-    "next": "16.4.5",
-    "react": "19.3.0",
-    "react-dom": "19.3.0"
+    "@prisma/client": "6.19.3",
+    "@telegram-apps/sdk-react": "^3.3.9",
+    "grammy": "^1.46.0",
+    "next": "16.2.11",
+    "next-themes": "^0.4.6",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
-    "@types/node": "^20",
+    "@types/node": "20.19.43",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "eslint": "^9",
     "eslint-config-next": "16.4.5",
+    "prisma": "6.19.3",
     "tailwindcss": "^4",
+    "tsx": "^4",
     "typescript": "^5"
+  },
+  "prisma": {
+    "schema": "prisma/schema.prisma"
+  },
+  "allowScripts": {
+    "@prisma/client": true,
+    "@prisma/engines": true,
+    "prisma": true,
+    "sharp": true,
+    "tailwindcss": true,
+    "@tailwindcss/oxide": true,
+    "@tailwindcss/turbopack": true
   }
 }

@@ -1,0 +1,85 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ==========================================
+// "Мой День" — standalone
+// ==========================================
+
+model MyDayProfile {
+  id         String   @id @default(cuid())
+  telegramId String   @unique
+  
+  onboardedAt   DateTime?
+  timezone      String @default("Europe/Moscow")
+  reminderTime  DateTime?
+  trialStartedAt DateTime?
+  proActive     Boolean @default(false)
+
+  dailyLogs   MyDayDailyLog[]
+  habits      MyDayHabit[]
+  insightRules MyDayInsightRule[]
+  reminderTasks MyDayReminderTask[]
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+enum LogStatus {
+  COMPLETED
+  UNKNOWN
+}
+
+model MyDayDailyLog {
+  id         Int       @id @default(autoincrement())
+  profileId  String
+  profile    MyDayProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  localDate  DateTime
+  sleepHours Float?
+  waterCups  Int?
+  mood       Int?
+  habitDone  Boolean?
+  status     LogStatus @default(UNKNOWN)
+  createdAt  DateTime  @default(now())
+  updatedAt  DateTime  @updatedAt
+  @@unique([profileId, localDate])
+}
+
+model MyDayHabit {
+  id         String  @id @default(cuid())
+  profileId  String
+  profile    MyDayProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  title      String
+  icon       String?
+  isActive   Boolean @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model MyDayInsightRule {
+  id         String  @id @default(cuid())
+  profileId  String?
+  profile    MyDayProfile? @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  condition  Json
+  message    String
+  isActive   Boolean @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+model MyDayReminderTask {
+  id          String  @id @default(cuid())
+  profileId   String
+  profile   MyDayProfile @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  createdAt   DateTime @default(now())
+  lastRetryAt DateTime?
+  retryCount  Int @default(0)
+  maxRetries  Int @default(3)
+  isActive    Boolean @default(true)
+  sentAt      DateTime?
+}

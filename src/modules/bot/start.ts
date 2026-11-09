@@ -1,8 +1,9 @@
 import { Bot } from "grammy";
 import { prisma } from "@/lib/prisma";
-import { getInsights, evaluateCondition } from "@/lib/myday/insights";
+import { getInsights } from "@/lib/myday/insights";
 import { calculateStreak, calculateAverage } from "@/lib/myday/streak";
 import { getLocalDateStr } from "@/lib/myday/datetime";
+import { sanitizeTelegramId } from "@/lib/myday/validation";
 import type { InsightCondition, StatsResponse } from "@/lib/myday/types";
 
 const bot = new Bot(process.env.TELEGRAM_BOT_TOKEN || "dev-token");
@@ -16,7 +17,8 @@ bot.command("start", async (ctx) => {
   const chatId = ctx.chat?.id;
   if (!chatId) return;
 
-  const telegramId = String(chatId);
+  const telegramId = sanitizeTelegramId(String(chatId));
+  if (!telegramId) return;
 
   const profile = await prisma.myDayProfile.upsert({
     where: { telegramId },
@@ -45,7 +47,8 @@ bot.command("stats", async (ctx) => {
   const chatId = ctx.chat?.id;
   if (!chatId) return;
 
-  const telegramId = String(chatId);
+  const telegramId = sanitizeTelegramId(String(chatId));
+  if (!telegramId) return;
 
   try {
     const profile = await prisma.myDayProfile.findUnique({
@@ -73,8 +76,8 @@ bot.command("stats", async (ctx) => {
       return ctx.reply("Пока нет данных для статистики. Начните отмечать дни!");
     }
 
-    // Use shared streak calculation
-    const streak = calculateStreak(profile.dailyLogs, new Date());
+    // Use timezone-aware streak calculation
+    const streak = calculateStreak(profile.dailyLogs, new Date(), profile.timezone);
 
     const avgSleep = calculateAverage(profile.dailyLogs, "sleepHours");
     const avgWater = calculateAverage(profile.dailyLogs, "waterCups", 0);
@@ -111,7 +114,8 @@ bot.command("insights", async (ctx) => {
   const chatId = ctx.chat?.id;
   if (!chatId) return;
 
-  const telegramId = String(chatId);
+  const telegramId = sanitizeTelegramId(String(chatId));
+  if (!telegramId) return;
 
   try {
     const profile = await prisma.myDayProfile.findUnique({
@@ -139,14 +143,14 @@ bot.command("insights", async (ctx) => {
       return ctx.reply("💡 Нужно минимум 3 записи для инсайтов. Продолжайте отмечать дни!");
     }
 
-    // Parse conditions and use shared helper
+    // Parse conditions and use shared helper with timezone
     const typedRules = profile.insightRules.map((rule) => ({
       id: rule.id,
       message: rule.message,
       condition: rule.condition as InsightCondition | null,
     }));
 
-    const matched = getInsights(typedRules, profile.dailyLogs);
+    const matched = getInsights(typedRules, profile.dailyLogs, profile.timezone);
 
     if (matched.length === 0) {
       return ctx.reply("🔍 Пока не нашли интересных закономерностей. Продолжайте вести дневник!");

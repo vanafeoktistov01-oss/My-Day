@@ -1,17 +1,17 @@
 import type { MyDayDailyLog } from "./types";
+import { getLocalDateStr } from "./datetime";
 
 /**
  * Calculate the current streak — consecutive days ending today (or yesterday)
  * where status === "COMPLETED".
  *
- * Returns the number of consecutive completed days counting backwards from today.
- * If today is not yet completed, it counts from yesterday.
+ * Uses the user's timezone to determine what "today" means.
  */
-export function calculateStreak(logs: MyDayDailyLog[], now: Date): number {
+export function calculateStreak(logs: MyDayDailyLog[], now: Date, timezone: string): number {
   const completedLogs = logs.filter((l) => l.status === "COMPLETED");
   if (completedLogs.length === 0) return 0;
 
-  // Build a set of date strings for O(1) lookup
+  // Build a set of date strings (YYYY-MM-DD) for O(1) lookup
   const dateSet = new Set(
     completedLogs.map((l) => l.localDate.toISOString().split("T")[0])
   );
@@ -19,14 +19,14 @@ export function calculateStreak(logs: MyDayDailyLog[], now: Date): number {
   let streak = 0;
   let checkDate = new Date(now);
 
-  // If today is not yet checked in, start from yesterday
-  const todayStr = checkDate.toISOString().split("T")[0];
+  // Use user's local date, not UTC
+  const todayStr = getLocalDateStr(now, timezone);
   if (!dateSet.has(todayStr)) {
     checkDate.setDate(checkDate.getDate() - 1);
   }
 
   while (true) {
-    const dateStr = checkDate.toISOString().split("T")[0];
+    const dateStr = getLocalDateStr(checkDate, timezone);
     if (dateSet.has(dateStr)) {
       streak++;
       checkDate.setDate(checkDate.getDate() - 1);

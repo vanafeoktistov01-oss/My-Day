@@ -1,4 +1,5 @@
 import type { MyDayDailyLog, InsightCondition } from "./types";
+import { getLocalDateStr } from "./datetime";
 
 /**
  * Evaluate an insight condition against a list of daily logs.
@@ -6,7 +7,8 @@ import type { MyDayDailyLog, InsightCondition } from "./types";
  */
 export function evaluateCondition(
   condition: InsightCondition | null,
-  logs: MyDayDailyLog[]
+  logs: MyDayDailyLog[],
+  timezone: string
 ): boolean {
   if (!condition) return false;
 
@@ -14,13 +16,13 @@ export function evaluateCondition(
 
   switch (condition.type) {
     case "less_than":
-      return evaluateLessThan(condition, completedLogs);
+      return evaluateLessThan(condition, completedLogs, timezone);
     case "greater_than":
-      return evaluateGreaterThan(condition, completedLogs);
+      return evaluateGreaterThan(condition, completedLogs, timezone);
     case "streak":
-      return evaluateStreak(condition, completedLogs);
+      return evaluateStreak(condition, completedLogs, timezone);
     case "missed":
-      return evaluateMissed(condition, completedLogs);
+      return evaluateMissed(condition, completedLogs, timezone);
     case "mood_trend":
       return evaluateMoodTrend(condition, completedLogs);
     default:
@@ -30,7 +32,8 @@ export function evaluateCondition(
 
 function evaluateLessThan(
   condition: Extract<InsightCondition, { type: "less_than" }>,
-  completedLogs: MyDayDailyLog[]
+  completedLogs: MyDayDailyLog[],
+  timezone: string
 ): boolean {
   const field = condition.field as keyof MyDayDailyLog;
   const threshold = condition.threshold;
@@ -38,12 +41,19 @@ function evaluateLessThan(
 
   if (!field || threshold === undefined) return false;
 
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  // Use user's local date for the window calculation
+  const now = new Date();
+  const sinceDateStr = getLocalDateStr(now, timezone);
+  const since = new Date(sinceDateStr + "T00:00:00.000Z");
   const recentLogs = completedLogs.filter((l) => l.localDate >= since);
+
   if (recentLogs.length === 0) return false;
 
   const belowCount = recentLogs.filter(
-    (l) => l[field] !== null && l[field] < threshold
+    (l) => {
+      const val = l[field];
+      return val !== null && typeof val === "number" && val < threshold;
+    }
   ).length;
 
   return belowCount >= (condition.minDays || 3);
@@ -51,7 +61,8 @@ function evaluateLessThan(
 
 function evaluateGreaterThan(
   condition: Extract<InsightCondition, { type: "greater_than" }>,
-  completedLogs: MyDayDailyLog[]
+  completedLogs: MyDayDailyLog[],
+  timezone: string
 ): boolean {
   const field = condition.field as keyof MyDayDailyLog;
   const threshold = condition.threshold;
@@ -59,12 +70,18 @@ function evaluateGreaterThan(
 
   if (!field || threshold === undefined) return false;
 
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+  const now = new Date();
+  const sinceDateStr = getLocalDateStr(now, timezone);
+  const since = new Date(sinceDateStr + "T00:00:00.000Z");
   const recentLogs = completedLogs.filter((l) => l.localDate >= since);
+
   if (recentLogs.length === 0) return false;
 
   const aboveCount = recentLogs.filter(
-    (l) => l[field] !== null && l[field] >= threshold
+    (l) => {
+      const val = l[field];
+      return val !== null && typeof val === "number" && val >= threshold;
+    }
   ).length;
 
   return aboveCount >= (condition.minDays || 3);
@@ -72,11 +89,12 @@ function evaluateGreaterThan(
 
 function evaluateStreak(
   condition: Extract<InsightCondition, { type: "streak" }>,
-  completedLogs: MyDayDailyLog[]
+  completedLogs: MyDayDailyLog[],
+  timezone: string
 ): boolean {
   if (!condition.minDays) return false;
 
-  // Build a set of completed date strings for O(1) lookup
+  // Build a set of date strings for O(1) lookup
   const dateSet = new Set(
     completedLogs.map((l) => l.localDate.toISOString().split("T")[0])
   );
@@ -84,13 +102,14 @@ function evaluateStreak(
   let streak = 0;
   let checkDate = new Date();
 
-  const todayStr = checkDate.toISOString().split("T")[0];
+  // Use user's local date
+  const todayStr = getLocalDateStr(checkDate, timezone);
   if (!dateSet.has(todayStr)) {
     checkDate.setDate(checkDate.getDate() - 1);
   }
 
   while (true) {
-    const dateStr = checkDate.toISOString().split("T")[0];
+    const dateStr = getLocalDateStr(checkDate, timezone);
     if (dateSet.has(dateStr)) {
       streak++;
       checkDate.setDate(checkDate.getDate() - 1);
@@ -104,10 +123,14 @@ function evaluateStreak(
 
 function evaluateMissed(
   condition: Extract<InsightCondition, { type: "missed" }>,
-  completedLogs: MyDayDailyLog[]
+  completedLogs: MyDayDailyLog[],
+  timezone: string
 ): boolean {
   const days = condition.days || 3;
-  const since = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
+  const now = new Date();
+  const sinceDateStr = getLocalDateStr(now, timezone);
+  const since = new Date(sinceDateStr + "T00:00:00.000Z");
   const recentLogs = completedLogs.filter((l) => l.localDate >= since);
 
   // If user missed more than 1 day in the last N days, trigger
@@ -137,12 +160,13 @@ function evaluateMoodTrend(
  */
 export function getInsights(
   rules: { id: string; message: string; condition: InsightCondition | null }[],
-  logs: MyDayDailyLog[]
+  logs: MyDayDailyLog[],
+  timezone: string
 ): Array<{ ruleId: string; message: string }> {
   const matched: Array<{ ruleId: string; message: string }> = [];
 
   for (const rule of rules) {
-    if (evaluateCondition(rule.condition, logs)) {
+    if (evaluateCondition(rule.condition, logs, timezone)) {
       matched.push({ ruleId: rule.id, message: rule.message });
     }
   }

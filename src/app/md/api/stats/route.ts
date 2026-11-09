@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/prisma";
 import { sanitizeTelegramId } from "@/lib/myday/validation";
 import { calculateStreak, calculateMaxStreak, calculateAverage } from "@/lib/myday/streak";
+import { getLocalDateStr } from "@/lib/myday/datetime";
 import type { StatsResponse } from "@/lib/myday/types";
 
 // GET /md/api/stats?telegramId=xxx
@@ -33,17 +34,18 @@ export async function GET(req: NextRequest) {
       orderBy: { localDate: "asc" },
     });
 
-    // Use shared streak calculation
-    const streak = calculateStreak(logs, new Date());
+    const now = new Date();
+
+    // Use shared streak calculation with user's timezone
+    const streak = calculateStreak(logs, now, profile.timezone);
     const maxStreak = calculateMaxStreak(logs);
 
-    // Heatmap (30 дней)
+    // Heatmap (30 дней) — uses user's local timezone for correct day alignment
     const heatmap: { date: string; completed: boolean }[] = [];
-    const now = new Date();
     for (let i = 29; i >= 0; i--) {
       const d = new Date(now);
       d.setDate(d.getDate() - i);
-      const dateStr = d.toISOString().split("T")[0];
+      const dateStr = getLocalDateStr(d, profile.timezone);
       const dayLog = logs.find(
         (l) => l.localDate.toISOString().split("T")[0] === dateStr
       );

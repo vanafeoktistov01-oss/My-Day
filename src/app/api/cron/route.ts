@@ -86,8 +86,12 @@ async function sendReminders(now: Date): Promise<number> {
         const reminderTime = profile.reminderTime;
         if (!reminderTime) continue;
 
-        // Use proper timezone-aware check
-        if (!isReminderTime(now, reminderTime.toTimeString().slice(0, 5), profile.timezone)) {
+        // Use proper timezone-aware check.
+        // reminderTime is stored at midnight UTC (e.g. "2000-01-01T09:00:00Z")
+        // Extract "HH:MM" from the ISO string (deterministic across Node versions)
+        const reminderTimeStr = reminderTime.toISOString().slice(11, 16);
+
+        if (!isReminderTime(now, reminderTimeStr, profile.timezone)) {
           continue;
         }
 
@@ -194,14 +198,14 @@ async function sendWeeklyInsights(): Promise<number> {
 
         if (completedLogs.length < 3) continue;
 
-        // Use shared typed rules and evaluator
+        // Use shared typed rules and evaluator with user's timezone
         const typedRules = profile.insightRules.map((rule) => ({
           id: rule.id,
           message: rule.message,
           condition: rule.condition as InsightCondition | null,
         }));
 
-        const matched = getInsights(typedRules, profile.dailyLogs);
+        const matched = getInsights(typedRules, profile.dailyLogs, profile.timezone);
         if (matched.length === 0) continue;
 
         await sendInsightsToUser(String(profile.telegramId), matched);

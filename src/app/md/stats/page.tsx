@@ -149,7 +149,7 @@ function StatsInner() {
               <div style={{ fontSize: "14px", fontWeight: 600, color: "var(--muted-foreground)", marginBottom: "12px" }}>
                 Привычки
               </div>
-              {stats.habits.map((habit: any) => (
+              {stats?.habits?.map((habit: any) => (
                 <div key={habit.id} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "10px 0", borderBottom: "1px solid var(--border)" }}>
                   <span style={{ fontSize: "20px" }}>{habit.icon || "🏃"}</span>
                   <span style={{ flex: 1, fontWeight: 500 }}>{habit.title}</span>

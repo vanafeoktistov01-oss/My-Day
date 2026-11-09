@@ -42,7 +42,7 @@ export async function GET(req: NextRequest) {
       condition: rule.condition as InsightCondition | null,
     }));
 
-    const matched = getInsights(typedRules, profile.dailyLogs);
+    const matched = getInsights(typedRules, profile.dailyLogs, profile.timezone);
 
     const response: InsightsResponse = { insights: matched };
     return NextResponse.json(response);

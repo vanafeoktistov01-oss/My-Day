@@ -19,7 +19,13 @@
       "Bash(curl *)",
       "Bash(lsof *)",
       "Bash(kill *)",
-      "Bash(tee *)"
+      "Bash(tee *)",
+      "Bash(gh *)",
+      "Bash(ssh-keygen *)",
+      "Bash(git push)",
+      "Bash(git pull *)",
+      "Bash(git stash)",
+      "Bash(git stash *)"
     ]
   },
   "$version": 3
